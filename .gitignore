@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 运行时产物（不纳入版本控制）
+data/
+logs/
+static/echarts.min.js
+
+# OS
+.DS_Store
