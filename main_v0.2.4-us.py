@@ -1499,6 +1499,15 @@ HTML = """<!DOCTYPE html>
     const state = { data: null, range: 50, ma: [5, 20], pollMs: 5000,
                     pollTimer: null, chart: null, results: [], ki: -1, stockName: '', market: 'sz', curCode: '' };
 
+    /* 热点 DOM 元素缓存（脚本末尾执行，DOM 已就绪） */
+    const els = {
+      price: $('td-price'), chg: $('td-chg'), src: $('st-source'),
+      trade: $('st-trade'), time: $('st-time'), alert: $('st-alert'),
+      lup: $('td-limit-up'), ldn: $('td-limit-down'),
+      upc: $('up-count'), dnc: $('down-count'),
+      name: $('td-name'), code: $('td-code'), mkt: $('td-mkt')
+    };
+
     function $(id) { return document.getElementById(id); }
     async function getJSON(url) {
       const r = await fetch(url);
@@ -1508,8 +1517,8 @@ HTML = """<!DOCTYPE html>
     function fmtVol(v) { if (v == null || isNaN(v)) return '--'; return v >= 10000 ? (v/10000).toFixed(2)+'万手' : v+'手'; }
     function fmtAmount(v) { if (v == null || isNaN(v)) return '--'; return v >= 1e8 ? (v/1e8).toFixed(2)+'亿' : (v/1e4).toFixed(0)+'万'; }
     function barColor(c, o) { return c > o ? UP : (c < o ? DOWN : FLAT); }
-    function showAlert(m) { $('st-alert').textContent = m; $('st-alert').classList.remove('hidden'); }
-    function hideAlert() { $('st-alert').classList.add('hidden'); }
+    function showAlert(m) { els.alert.textContent = m; els.alert.classList.remove('hidden'); }
+    function hideAlert() { els.alert.classList.add('hidden'); }
     function setLoading(on, text) {
       const el = $('loading');
       if (el) el.classList.toggle('hidden', !on);
@@ -1520,6 +1529,20 @@ HTML = """<!DOCTYPE html>
     const searchInput = $('searchInput'), dropdown = $('dropdown');
 
     function hideDropdown() { dropdown.classList.add('hidden'); state.ki = -1; }
+
+    /* 下拉容器事件委托：点击选中 + 悬停高亮（一次性绑定） */
+    dropdown.addEventListener('click', function (e) {
+      const itemEl = e.target.closest('.s-item');
+      if (!itemEl) return;
+      const item = state.results[+itemEl.dataset.i];
+      if (item) selectStock(item);
+    });
+    dropdown.addEventListener('mouseover', function (e) {
+      const itemEl = e.target.closest('.s-item');
+      if (!itemEl) return;
+      state.ki = +itemEl.dataset.i;
+      highlightItem();
+    });
 
     function renderDropdown(results) {
       state.results = results; state.ki = -1;
@@ -1533,16 +1556,6 @@ HTML = """<!DOCTYPE html>
             '<span class="s-code">' + r.code + '</span>' +
             '<span class="s-mkt ' + r.market + '">' + mkt + '</span></div>';
         }).join('');
-        dropdown.querySelectorAll('.s-item').forEach(function (el) {
-          el.addEventListener('click', function () {
-            const item = state.results[+el.dataset.i];
-            if (item) selectStock(item);
-          });
-          el.addEventListener('mouseenter', function () {
-            state.ki = +el.dataset.i;
-            highlightItem();
-          });
-        });
       }
       dropdown.classList.remove('hidden');
     }
@@ -1718,9 +1731,9 @@ HTML = """<!DOCTYPE html>
         state.stockName = r.name;
         state.market = r.market;
         state.curCode = r.symbol;
-        $('td-name').textContent = r.name;
-        $('td-code').textContent = r.symbol;
-        $('td-mkt').textContent = r.market.toUpperCase();
+        els.name.textContent = r.name;
+        els.code.textContent = r.symbol;
+        els.mkt.textContent = r.market.toUpperCase();
         if (r.market === 'us') {
           $('limit-panel').classList.add('hidden');
           $('td-limit-up').textContent = '--';
@@ -1858,8 +1871,8 @@ HTML = """<!DOCTYPE html>
         const j = await getJSON('/api/kline' + (force ? '?refresh=1' : ''));
         if (j.error) throw new Error(j.error);
         state.data = j;
-        $('td-name').textContent = j.name || state.stockName;
-        $('td-code').textContent = j.code;
+        els.name.textContent = j.name || state.stockName;
+        els.code.textContent = j.code;
         render();
       } catch (e) {
         showAlert('历史数据加载失败: ' + e.message);
@@ -1871,11 +1884,11 @@ HTML = """<!DOCTYPE html>
     function updateTopbar(j) {
       const up = j.change >= 0;
       const col = j.change > 0 ? UP : (j.change < 0 ? DOWN : FLAT);
-      $('td-price').textContent = fmtPrice(j.price);
-      $('td-price').style.color = col;
-      $('td-chg').textContent = (up ? '+' : '') + fmtPrice(j.change) + '  ' +
+      els.price.textContent = fmtPrice(j.price);
+      els.price.style.color = col;
+      els.chg.textContent = (up ? '+' : '') + fmtPrice(j.change) + '  ' +
                                 (up ? '+' : '') + fmtPrice(j.pct) + '%';
-      $('td-chg').style.color = col;
+      els.chg.style.color = col;
       $('td-open').textContent = fmtPrice(j.open);
       $('td-prev').textContent = fmtPrice(j.prev_close);
       $('td-high').textContent = fmtPrice(j.high);
@@ -1883,20 +1896,20 @@ HTML = """<!DOCTYPE html>
       $('td-vol').textContent = fmtVol(j.volume);
       $('td-amt').textContent = fmtAmount(j.amount);
       if (j.limit_up != null && j.limit_down != null) {
-        $('td-limit-up').textContent = fmtPrice(j.limit_up);
-        $('td-limit-down').textContent = fmtPrice(j.limit_down);
-        $('td-limit-up').style.color = j.price >= j.limit_up ? '#FFD93D' : '';
-        $('td-limit-down').style.color = j.price <= j.limit_down ? '#FFD93D' : '';
+        els.lup.textContent = fmtPrice(j.limit_up);
+        els.ldn.textContent = fmtPrice(j.limit_down);
+        els.lup.style.color = j.price >= j.limit_up ? '#FFD93D' : '';
+        els.ldn.style.color = j.price <= j.limit_down ? '#FFD93D' : '';
       } else {
-        $('td-limit-up').textContent = '--';
-        $('td-limit-down').textContent = '--';
-        $('td-limit-up').style.color = '';
-        $('td-limit-down').style.color = '';
+        els.lup.textContent = '--';
+        els.ldn.textContent = '--';
+        els.lup.style.color = '';
+        els.ldn.style.color = '';
       }
-      $('st-source').textContent = '数据源: ' + j.source + (j.cached ? '（缓存）' : '');
-      $('st-source').style.color = j.cached ? '#FFB020' : '#888';
-      $('st-trade').textContent = j.trade_status;
-      $('st-time').textContent = j.timestamp ? '最后更新 ' + j.timestamp.slice(11) : '';
+      els.src.textContent = '数据源: ' + j.source + (j.cached ? '（缓存）' : '');
+      els.src.style.color = j.cached ? '#FFB020' : '#888';
+      els.trade.textContent = j.trade_status;
+      els.time.textContent = j.timestamp ? '最后更新 ' + j.timestamp.slice(11) : '';
     }
 
     function updateLastBar(j) {
@@ -1925,6 +1938,16 @@ HTML = """<!DOCTYPE html>
       if (state.pollTimer) clearInterval(state.pollTimer);
       state.pollTimer = setInterval(poll, ms);
     }
+
+    /* 页面隐藏时暂停轮询，恢复可见时立即刷新并恢复轮询 */
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) {
+        if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+      } else if (state.pollTimer === null) {
+        poll();
+        schedulePoll();
+      }
+    });
 
     async function poll() {
       try {
@@ -1958,13 +1981,22 @@ HTML = """<!DOCTYPE html>
       }).join('');
     }
 
+    let limitPoolErr = 0;   // 连续失败次数（P5 错误退避）
+    function scheduleLimitPool() {
+      const base = 60000;
+      const delay = base * Math.pow(2, Math.min(limitPoolErr, 2));
+      setTimeout(loadLimitPool, delay);
+    }
+
     async function loadLimitPool() {
       if (state.market === 'us') {
         $('up-list').innerHTML = '<div class="empty">美股无涨跌停机制</div>';
         $('down-list').innerHTML = '';
-        $('up-count').textContent = '';
-        $('down-count').textContent = '';
+        els.upc.textContent = '';
+        els.dnc.textContent = '';
         $('pool-date').textContent = '';
+        limitPoolErr = 0;
+        scheduleLimitPool();
         return;
       }
       try {
@@ -1972,13 +2004,17 @@ HTML = """<!DOCTYPE html>
         if (j.error) throw new Error(j.error);
         renderPool(j.up, $('up-list'), true);
         renderPool(j.down, $('down-list'), false);
-        $('up-count').textContent = j.up_count + ' 只';
-        $('down-count').textContent = j.down_count + ' 只';
+        els.upc.textContent = j.up_count + ' 只';
+        els.dnc.textContent = j.down_count + ' 只';
         const d = j.date, ds = d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6);
         $('pool-date').textContent = '最近交易日 ' + ds;
+        limitPoolErr = 0;
+        scheduleLimitPool();
       } catch (e) {
+        limitPoolErr++;
         $('up-list').innerHTML = '<div class="empty">加载失败，请检查网络</div>';
         $('down-list').innerHTML = '<div class="empty">加载失败，请检查网络</div>';
+        scheduleLimitPool();
       }
     }
 
@@ -1989,7 +2025,6 @@ HTML = """<!DOCTYPE html>
       });
     });
     loadLimitPool();
-    setInterval(loadLimitPool, 60000);
 
     async function loadConfig() {
       try {
@@ -2008,9 +2043,9 @@ HTML = """<!DOCTYPE html>
         state.stockName = c.name;
         state.market = c.market;
         state.curCode = c.symbol;
-        $('td-name').textContent = c.name;
-        $('td-code').textContent = c.symbol;
-        $('td-mkt').textContent = c.market.toUpperCase();
+        els.name.textContent = c.name;
+        els.code.textContent = c.symbol;
+        els.mkt.textContent = c.market.toUpperCase();
         if (c.market === 'us') {
           $('limit-panel').classList.add('hidden');
           $('td-limit-up').textContent = '--';
