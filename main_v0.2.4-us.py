@@ -42,6 +42,7 @@ import sys
 import threading
 import time
 import webbrowser
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -148,23 +149,32 @@ def trade_status(now: dt.datetime | None = None) -> str:
     return "已收盘"
 
 
+# 美东时区：ZoneInfo 自动处理夏令时切换（3月第二个周日 ~ 11月第一个周日）
+ET = ZoneInfo("America/New_York")
+EDT = dt.timezone(dt.timedelta(hours=-4))   # 美东夏令时（EDT）
+EST = dt.timezone(dt.timedelta(hours=-5))   # 美东标准时间（EST）
+
+
+def us_et_time(now: dt.datetime | None = None) -> dt.datetime:
+    """将时刻换算为美东时间（含夏令时），返回带 tzinfo 的 aware datetime。
+
+    - now 为 None 时取当前 UTC 时间；
+    - now 为 naive 时视为 UTC；
+    - now 为 aware 时直接换算。
+    返回值的 tzinfo 为 EDT（夏令时）或 EST（标准时间），便于区分。
+    """
+    now = now or dt.datetime.now(dt.timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=dt.timezone.utc)
+    et = now.astimezone(ET)
+    tz = EDT if et.utcoffset() == EDT.utcoffset(None) else EST
+    return et.replace(tzinfo=tz)
+
+
 def us_trade_status(now: dt.datetime | None = None) -> str:
-    """美股交易状态：按美东时间（含夏令时，边缘误差约 2 小时可接受）。
-    夏令时（3月第二个周日 ~ 11月第一个周日）美东 = UTC-4，其余 = UTC-5。
-    盘前 4:00-9:30，正式交易 9:30-16:00，盘后 16:00-20:00。"""
-    now = now or dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
-    year = now.year
-
-    def second_sunday(m: int) -> dt.date:
-        d = dt.date(year, m, 1)
-        return d + dt.timedelta(days=(7 - d.weekday()) % 7 + 7)
-
-    def first_sunday(m: int) -> dt.date:
-        d = dt.date(year, m, 1)
-        return d + dt.timedelta(days=(7 - d.weekday()) % 7)
-
-    dst = second_sunday(3) <= now.date() < first_sunday(11)
-    et = now - dt.timedelta(hours=4 if dst else 5)
+    """美股交易状态：按美东时间（含夏令时）判断。
+    盘前 4:00-9:30，正式交易 9:30-16:00，盘后 16:00-20:00，周末休市。"""
+    et = us_et_time(now)
     if et.weekday() >= 5:
         return "休市日"
     hm = et.hour * 100 + et.minute
@@ -1529,6 +1539,7 @@ HTML = """<!DOCTYPE html>
     const searchInput = $('searchInput'), dropdown = $('dropdown');
 
     function hideDropdown() { dropdown.classList.add('hidden'); state.ki = -1; }
+    function showDropdown() { dropdown.classList.remove('hidden'); }
 
     /* 下拉容器事件委托：点击选中 + 悬停高亮（一次性绑定） */
     dropdown.addEventListener('click', function (e) {
@@ -1591,15 +1602,24 @@ HTML = """<!DOCTYPE html>
       try {
         const j = await getJSON('/api/search?q=' + encodeURIComponent(q));
         renderDropdown(j.results || []);
-      } catch (e) { /* 忽略搜索错误 */ }
+      } catch (e) {
+        $('dropdown').innerHTML = '<div class="s-empty">搜索失败，请检查网络</div>';
+        showDropdown();
+      }
     }
 
     /* ---------- 新闻 + 面板开关 + 收藏 + 横向滑动 ---------- */
     function loadNews() {
       const list = $('news-list');
+      const reqCode = state.curCode;
       list.innerHTML = '<div class="empty">加载中…</div>';
       getJSON('/api/news').then(function (j) {
-        if (j.error || !j.items || !j.items.length) {
+        if (reqCode !== state.curCode) return;   // 已切换标的，丢弃旧响应
+        if (j.error || j.ok === false) {
+          list.innerHTML = '<div class="empty">新闻加载失败</div>';
+          return;
+        }
+        if (!j.items || !j.items.length) {
           list.innerHTML = '<div class="empty">暂无相关新闻</div>';
           return;
         }
@@ -1740,6 +1760,8 @@ HTML = """<!DOCTYPE html>
           $('td-limit-down').textContent = '--';
         } else if (localStorage.getItem('lp_hidden') !== '1') {
           $('limit-panel').classList.remove('hidden');
+        } else {
+          $('toggle-limit').textContent = '展开 ▸';
         }
         updateFavBtn();
         loadNews();
@@ -1950,8 +1972,10 @@ HTML = """<!DOCTYPE html>
     });
 
     async function poll() {
+      const reqCode = state.curCode;
       try {
         const j = await getJSON('/api/realtime');
+        if (reqCode !== state.curCode) return;   // 已切换标的，丢弃旧响应
         if (j.error) { showAlert(j.error); return; }
         hideAlert();
         updateTopbar(j);

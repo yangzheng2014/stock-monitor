@@ -1346,6 +1346,7 @@ HTML = """<!DOCTYPE html>
     const searchInput = $('searchInput'), dropdown = $('dropdown');
 
     function hideDropdown() { dropdown.classList.add('hidden'); state.ki = -1; }
+    function showDropdown() { dropdown.classList.remove('hidden'); }
 
     /* 下拉容器事件委托：点击选中 + 悬停高亮（一次性绑定） */
     dropdown.addEventListener('click', function (e) {
@@ -1407,15 +1408,24 @@ HTML = """<!DOCTYPE html>
       try {
         const j = await getJSON('/api/search?q=' + encodeURIComponent(q));
         renderDropdown(j.results || []);
-      } catch (e) { /* 忽略搜索错误 */ }
+      } catch (e) {
+        $('dropdown').innerHTML = '<div class="s-empty">搜索失败，请检查网络</div>';
+        showDropdown();
+      }
     }
 
     /* ---------- 个股新闻 ---------- */
     function loadNews() {
       const list = $('news-list');
+      const reqCode = state.curCode;
       list.innerHTML = '<div class="empty">加载中…</div>';
       getJSON('/api/news').then(function (j) {
-        if (j.error || !j.items || !j.items.length) {
+        if (reqCode !== state.curCode) return;   // 已切换标的，丢弃旧响应
+        if (j.error || j.ok === false) {
+          list.innerHTML = '<div class="empty">新闻加载失败</div>';
+          return;
+        }
+        if (!j.items || !j.items.length) {
           list.innerHTML = '<div class="empty">暂无相关新闻</div>';
           return;
         }
@@ -1756,8 +1766,10 @@ HTML = """<!DOCTYPE html>
     });
 
     async function poll() {
+      const reqCode = state.curCode;
       try {
         const j = await getJSON('/api/realtime');
+        if (reqCode !== state.curCode) return;   // 已切换标的，丢弃旧响应
         if (j.error) { showAlert(j.error); return; }
         hideAlert();
         updateTopbar(j);
